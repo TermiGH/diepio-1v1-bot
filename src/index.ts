@@ -13,7 +13,7 @@ import {
   initDatabase, createMatch, getMatch, saveResult, getResults, completeMatch,
   getPlayer, getPlayerInfo, getPlayerMatches, updatePlayerElo, getLeaderboard, getLeaderboardByTank,
   calcEloChange, closeDatabase, createReport, resetPlayerElo, setPlayerElo,
-  requestCancel, cancelMatch, getConfig, setConfig, Match, Result, PlayerInfo
+  requestCancel, cancelMatch, updateMatchToken, getConfig, setConfig, Match, Result, PlayerInfo
 } from './database';
 import { createSandbox } from './sandbox';
 
@@ -241,6 +241,7 @@ async function handle1v1(interaction: ChatInputCommandInteraction) {
   }
 
   await interaction.editReply({ embeds: [embed] });
+  updateMatchToken(match.id, interaction.token);
 }
 
 async function handlePartySlash(interaction: ChatInputCommandInteraction) {
@@ -286,6 +287,7 @@ async function handlePartySlash(interaction: ChatInputCommandInteraction) {
   }
 
   await interaction.reply({ embeds: [embed] });
+  updateMatchToken(match.id, interaction.token);
 }
 
 async function handleLeaderboard(interaction: ChatInputCommandInteraction) {
@@ -475,11 +477,15 @@ async function handleCancelButton(interaction: ButtonInteraction) {
     cancelMatch(matchId);
 
     const cancelEmbed = new EmbedBuilder()
-      .setTitle('Partida cancelada')
-      .setDescription(`Partida **#${matchId}** cancelada por ambos jugadores.`)
+      .setTitle('Partida cancelada ❌')
+      .setDescription(`<@${match.player1_id}> vs <@${match.player2_id}>`)
+      .addFields(
+        { name: 'ID', value: `\`${match.id}\``, inline: true },
+        { name: 'Estado', value: 'Cancelada por ambos jugadores', inline: false },
+      )
       .setColor(0x888888);
 
-    await trySendToChannel(match.channel_id, cancelEmbed);
+    await updateMatchEmbed(match, cancelEmbed);
 
     for (const id of [match.player1_id, match.player2_id]) {
       try {
@@ -765,7 +771,7 @@ async function processMatchCompletion(match: Match, results: Result[]) {
       )
       .setColor(0xffff00);
 
-    await trySendToChannel(match.channel_id, drawEmbed);
+    await updateMatchEmbed(match, drawEmbed);
     await trySendToResultChannel(drawEmbed);
 
     const notifyEmbed = new EmbedBuilder()
@@ -815,7 +821,7 @@ async function processMatchCompletion(match: Match, results: Result[]) {
     )
     .setColor(0xffd700);
 
-  await trySendToChannel(match.channel_id, finalEmbed);
+  await updateMatchEmbed(match, finalEmbed);
 
   const resultChannelId = getConfig('result_channel_id');
   if (resultChannelId) {
@@ -846,6 +852,22 @@ async function processMatchCompletion(match: Match, results: Result[]) {
       await u.send({ embeds: [notifyEmbed] });
     } catch {}
   }
+}
+
+async function updateMatchEmbed(match: Match, embed: EmbedBuilder) {
+  if (match.interaction_token) {
+    try {
+      const rest = new REST({ version: '10' }).setToken(TOKEN);
+      await rest.patch(Routes.webhookMessage(CLIENT_ID, match.interaction_token), {
+        body: { embeds: [embed.toJSON()] }
+      });
+      return; // exito
+    } catch (err: any) {
+      console.error(`Error usando webhook para match ${match.id}: ${err?.message || err}`);
+    }
+  }
+  // fallback
+  await trySendToChannel(match.channel_id, embed);
 }
 
 async function trySendToChannel(channelId: string, embed: EmbedBuilder) {

@@ -66,6 +66,12 @@ export function initDatabase(): void {
   } catch {
     /* columna ya existe */
   }
+
+  try {
+    db.exec(`ALTER TABLE matches ADD COLUMN interaction_token TEXT DEFAULT NULL`);
+  } catch {
+    /* columna ya existe */
+  }
 }
 
 export interface Match {
@@ -77,6 +83,7 @@ export interface Match {
   status: string;
   winner_id: string | null;
   cancel_votes: string | null;
+  interaction_token: string | null;
   created_at: string;
 }
 
@@ -181,6 +188,10 @@ export function requestCancel(matchId: number, playerId: string): boolean {
 
 export function cancelMatch(matchId: number): void {
   db.prepare(`UPDATE matches SET status = 'cancelled' WHERE id = ?`).run(matchId);
+}
+
+export function updateMatchToken(matchId: number, token: string): void {
+  db.prepare(`UPDATE matches SET interaction_token = ? WHERE id = ?`).run(token, matchId);
 }
 
 export function getPlayer(userId: string): Player {
