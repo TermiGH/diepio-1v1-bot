@@ -851,8 +851,10 @@ async function processMatchCompletion(match: Match, results: Result[]) {
 async function trySendToChannel(channelId: string, embed: EmbedBuilder) {
   try {
     const channel = await client.channels.fetch(channelId);
-    if (channel instanceof TextChannel) {
-      await channel.send({ embeds: [embed] });
+    if (channel && 'send' in channel) {
+      await (channel as any).send({ embeds: [embed] });
+    } else {
+      console.error(`No se pudo enviar al canal ${channelId}: el canal no existe o no es text-based`);
     }
   } catch (err: any) {
     console.error(`No se pudo enviar al canal ${channelId}: ${err?.message || err}`);
@@ -864,8 +866,8 @@ async function trySendToResultChannel(embed: EmbedBuilder) {
   if (!resultChannelId) return;
   try {
     const channel = await client.channels.fetch(resultChannelId);
-    if (channel instanceof TextChannel) {
-      await channel.send({ embeds: [embed] });
+    if (channel && 'send' in channel) {
+      await (channel as any).send({ embeds: [embed] });
     }
   } catch (err: any) {
     console.error(`No se pudo enviar al canal de resultados ${resultChannelId}: ${err?.message || err}`);
