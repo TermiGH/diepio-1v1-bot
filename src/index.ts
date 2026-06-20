@@ -15,7 +15,7 @@ import {
   calcEloChange, closeDatabase, createReport, resetPlayerElo, setPlayerElo,
   requestCancel, cancelMatch, updateMatchToken, getConfig, setConfig, Match, Result, PlayerInfo
 } from './database';
-import { createSandbox } from './sandbox';
+import { createSandbox, type SandboxBrowserResult } from './sandbox';
 
 dotenv.config();
 
@@ -166,6 +166,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
+const activeBrowsers = new Map<number, () => Promise<void>>();
+
+async function closeBrowserForMatch(matchId: number) {
+  const close = activeBrowsers.get(matchId);
+  if (close) {
+    await close();
+    activeBrowsers.delete(matchId);
+  }
+}
+
 function isAdmin(interaction: ChatInputCommandInteraction): boolean {
   return interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
 }
@@ -211,6 +221,8 @@ async function handle1v1(interaction: ChatInputCommandInteraction) {
 
   const uniqueId = result.region || 'sandbox';
   const match = createMatch(interaction.channelId, player1.id, player2.id, uniqueId);
+
+  activeBrowsers.set(match.id, result.close);
 
   const embed = new EmbedBuilder()
     .setTitle('Partida creada')
@@ -494,6 +506,8 @@ async function handleCancelButton(interaction: ButtonInteraction) {
       } catch {}
     }
 
+    await closeBrowserForMatch(matchId);
+
     await interaction.reply({ content: '✅ Partida cancelada. Ambos jugadores confirmaron.', flags: MessageFlags.Ephemeral });
   } else {
     await interaction.reply({ content: '⏳ Voto registrado. Esperando a que el otro jugador también confirme la cancelación.', flags: MessageFlags.Ephemeral });
@@ -773,6 +787,7 @@ async function processMatchCompletion(match: Match, results: Result[]) {
 
     await updateMatchEmbed(match, drawEmbed);
     await trySendToResultChannel(drawEmbed);
+    await closeBrowserForMatch(match.id);
 
     const notifyEmbed = new EmbedBuilder()
       .setTitle('Partida finalizada — Empate')
@@ -836,6 +851,8 @@ async function processMatchCompletion(match: Match, results: Result[]) {
       .setColor(0xffd700);
     await trySendToResultChannel(resultTextEmbed);
   }
+
+  await closeBrowserForMatch(match.id);
 
   const notifyEmbed = new EmbedBuilder()
     .setTitle('Partida finalizada')
@@ -956,7 +973,13 @@ async function updateNickname(guild: Guild, userId: string, elo: number) {
   } catch {}
 }
 
-process.on('SIGINT', () => { closeDatabase(); client.destroy(); process.exit(0); });
-process.on('SIGTERM', () => { closeDatabase(); client.destroy(); process.exit(0); });
+async function closeAllBrowsers() {
+  const closers = [...activeBrowsers.values()];
+  activeBrowsers.clear();
+  await Promise.allSettled(closers.map(c => c()));
+}
+
+process.on('SIGINT', async () => { await closeAllBrowsers(); closeDatabase(); client.destroy(); process.exit(0); });
+process.on('SIGTERM', async () => { await closeAllBrowsers(); closeDatabase(); client.destroy(); process.exit(0); });
 
 client.login(TOKEN);
