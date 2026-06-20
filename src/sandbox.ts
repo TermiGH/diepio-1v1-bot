@@ -1,15 +1,11 @@
-import puppeteer from 'puppeteer-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import https from 'https';
 
-puppeteer.use(StealthPlugin());
-
-export interface SandboxBrowserResult {
+export interface SandboxResult {
   link: string;
   success: boolean;
   region?: string;
   error?: string;
-  close: () => Promise<void>;
+  close?: () => Promise<void>;
 }
 
 interface Lobby {
@@ -31,8 +27,6 @@ interface ServerListResponse {
 }
 
 const SANDBOX_GAMEMODES = ['sandbox'];
-const ROOM_ID_TIMEOUT_MS = 30000;
-const BROWSER_AUTO_CLOSE_MS = 30 * 60 * 1000;
 
 function fetchJson(url: string): Promise<any> {
   return new Promise((resolve, reject) => {
@@ -47,8 +41,7 @@ function fetchJson(url: string): Promise<any> {
   });
 }
 
-export async function createSandbox(region?: string): Promise<SandboxBrowserResult> {
-  let browser: any;
+export async function createSandbox(region?: string): Promise<SandboxResult> {
   try {
     const response: ServerListResponse = await fetchJson('https://lb.diep.io/api/lb/pc');
 
@@ -62,68 +55,26 @@ export async function createSandbox(region?: string): Promise<SandboxBrowserResu
     }
 
     if (sandboxLobbies.length === 0) {
-      return { link: '', success: false, error: 'No hay servidores sandbox disponibles', close: async () => {} };
+      return { link: '', success: false, error: 'No hay servidores sandbox disponibles' };
     }
 
     let filtered = sandboxLobbies;
     if (region && region !== 'auto') {
       filtered = sandboxLobbies.filter(s => s.regionCode === region);
       if (filtered.length === 0) {
-        return { link: '', success: false, error: `No hay servidores sandbox en la región "${region}"`, close: async () => {} };
+        return { link: '', success: false, error: `No hay servidores sandbox en la región "${region}"` };
       }
     }
 
     filtered.sort((a, b) => a.lobby.numPlayers - b.lobby.numPlayers);
     const target = filtered[0];
-    const baseUrl = `https://diep.io/?lobby=${target.regionCode}_${target.lobby.gamemode}_${target.lobby.ip}`;
 
-    browser = await puppeteer.launch({
-      headless: process.env.BROWSER_VISIBLE === 'true' ? false : true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--disable-web-security',
-      ],
-    });
+    // Generamos un room ID único para esta partida (9 dígitos como en los URLs reales)
+    const roomId = Math.floor(100000000 + Math.random() * 900000000);
+    const link = `https://diep.io/?lobby=${target.regionCode}_${target.lobby.gamemode}_${target.lobby.ip}_${roomId}_0`;
 
-    const page = await browser.newPage();
-    await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
-    );
-
-    await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
-
-    // Poll for URL change (room ID assigned by game)
-    const deadline = Date.now() + ROOM_ID_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 500));
-      const currentUrl = page.url();
-      if (currentUrl !== baseUrl && currentUrl.includes('_')) break;
-    }
-
-    await new Promise(r => setTimeout(r, 2000));
-
-    const finalUrl = page.url();
-
-    const timer = setTimeout(async () => {
-      try { await browser.close(); } catch {}
-    }, BROWSER_AUTO_CLOSE_MS);
-
-    return {
-      link: finalUrl,
-      success: true,
-      region: target.regionCode,
-      close: async () => {
-        clearTimeout(timer);
-        try { await browser.close(); } catch {}
-      },
-    };
+    return { link, success: true, region: target.regionCode };
   } catch (err: any) {
-    if (browser) {
-      try { await browser.close(); } catch {}
-    }
-    return { link: '', success: false, error: err?.message || 'Error al crear sandbox', close: async () => {} };
+    return { link: '', success: false, error: err?.message || 'Error al obtener servidores' };
   }
 }
