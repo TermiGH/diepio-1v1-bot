@@ -13,7 +13,7 @@ import {
   initDatabase, createMatch, getMatch, saveResult, getResults, completeMatch,
   getPlayer, getPlayerInfo, getPlayerMatches, updatePlayerElo, getLeaderboard, getLeaderboardByTank,
   calcEloChange, closeDatabase, createReport, resetPlayerElo, setPlayerElo,
-  getConfig, setConfig, Match, Result, PlayerInfo
+  requestCancel, cancelMatch, getConfig, setConfig, Match, Result, PlayerInfo
 } from './database';
 import { createSandbox } from './sandbox';
 
@@ -151,6 +151,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const { customId } = interaction;
     if (customId.startsWith('report_match_')) {
       await handleReportButton(interaction);
+    } else if (customId.startsWith('cancel_match_')) {
+      await handleCancelButton(interaction);
     }
     return;
   }
@@ -174,7 +176,11 @@ async function sendDmWithButton(userId: string, embed: EmbedBuilder, matchId: nu
       new ButtonBuilder()
         .setCustomId(`report_match_${matchId}`)
         .setLabel('📝 Reportar resultado')
-        .setStyle(ButtonStyle.Primary)
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`cancel_match_${matchId}`)
+        .setLabel('🗑️ Cancelar partida')
+        .setStyle(ButtonStyle.Danger)
     );
     const u = await client.users.fetch(userId);
     await u.send({ embeds: [embed], components: [row] });
@@ -442,6 +448,50 @@ async function handleInfoTankSelect(interaction: StringSelectMenuInteraction) {
   const selectMenu = buildInfoTankMenu(targetUserId, info);
   const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu);
   await interaction.update({ embeds: [embed], components: [row] });
+}
+
+async function handleCancelButton(interaction: ButtonInteraction) {
+  const matchId = parseInt(interaction.customId.split('_')[2], 10);
+  if (isNaN(matchId)) {
+    return interaction.reply({ content: 'ID de partida inválido.', flags: MessageFlags.Ephemeral });
+  }
+
+  const match = getMatch(matchId);
+  if (!match) {
+    return interaction.reply({ content: 'Partida no encontrada.', flags: MessageFlags.Ephemeral });
+  }
+  if (match.status !== 'pending') {
+    return interaction.reply({ content: 'Esta partida ya fue cerrada.', flags: MessageFlags.Ephemeral });
+  }
+
+  const isPlayer = match.player1_id === interaction.user.id || match.player2_id === interaction.user.id;
+  if (!isPlayer) {
+    return interaction.reply({ content: 'No eres parte de esta partida.', flags: MessageFlags.Ephemeral });
+  }
+
+  const bothVoted = requestCancel(matchId, interaction.user.id);
+
+  if (bothVoted) {
+    cancelMatch(matchId);
+
+    const cancelEmbed = new EmbedBuilder()
+      .setTitle('Partida cancelada')
+      .setDescription(`Partida **#${matchId}** cancelada por ambos jugadores.`)
+      .setColor(0x888888);
+
+    await trySendToChannel(match.channel_id, cancelEmbed);
+
+    for (const id of [match.player1_id, match.player2_id]) {
+      try {
+        const u = await client.users.fetch(id);
+        await u.send({ embeds: [cancelEmbed] });
+      } catch {}
+    }
+
+    await interaction.reply({ content: '✅ Partida cancelada. Ambos jugadores confirmaron.', flags: MessageFlags.Ephemeral });
+  } else {
+    await interaction.reply({ content: '⏳ Voto registrado. Esperando a que el otro jugador también confirme la cancelación.', flags: MessageFlags.Ephemeral });
+  }
 }
 
 async function handleReport(interaction: ChatInputCommandInteraction) {

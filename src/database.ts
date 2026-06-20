@@ -60,6 +60,12 @@ export function initDatabase(): void {
   } catch {
     /* columna ya existe */
   }
+
+  try {
+    db.exec(`ALTER TABLE matches ADD COLUMN cancel_votes TEXT DEFAULT NULL`);
+  } catch {
+    /* columna ya existe */
+  }
 }
 
 export interface Match {
@@ -70,6 +76,7 @@ export interface Match {
   room_code: string;
   status: string;
   winner_id: string | null;
+  cancel_votes: string | null;
   created_at: string;
 }
 
@@ -157,6 +164,23 @@ export interface PlayerMatch {
 export function completeMatch(matchId: number, winnerId: string | null): void {
   const stmt = db.prepare(`UPDATE matches SET status = 'completed', winner_id = ? WHERE id = ?`);
   stmt.run(winnerId, matchId);
+}
+
+export function requestCancel(matchId: number, playerId: string): boolean {
+  const match = getMatch(matchId);
+  if (!match) return false;
+
+  let votes: string[] = match.cancel_votes ? JSON.parse(match.cancel_votes) : [];
+  if (!votes.includes(playerId)) {
+    votes.push(playerId);
+    db.prepare(`UPDATE matches SET cancel_votes = ? WHERE id = ?`).run(JSON.stringify(votes), matchId);
+  }
+
+  return votes.includes(match.player1_id) && votes.includes(match.player2_id);
+}
+
+export function cancelMatch(matchId: number): void {
+  db.prepare(`UPDATE matches SET status = 'cancelled' WHERE id = ?`).run(matchId);
 }
 
 export function getPlayer(userId: string): Player {
