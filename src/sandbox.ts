@@ -142,12 +142,15 @@ export async function createSandbox(region?: string): Promise<SandboxBrowserResu
     await new Promise(r => setTimeout(r, 1500));
     finalUrl = page.url();
 
+    // Strip #r hash — solo necesario para crear sala, no para los jugadores
+    finalUrl = finalUrl.replace(/#r\w+$/, '');
+
     const lobbyParam = new URL(finalUrl).searchParams.get('lobby') || '';
     const parts = lobbyParam.split('_');
 
     if (parts.length < 5 && parts.length >= 3) {
       const roomId = Math.floor(100000000 + Math.random() * 900000000);
-      finalUrl = `https://diep.io/?lobby=${target.regionCode}_${target.lobby.gamemode}_${target.lobby.ip}_${roomId}_0#r${partyCode}`;
+      finalUrl = `https://diep.io/?lobby=${target.regionCode}_${target.lobby.gamemode}_${target.lobby.ip}_${roomId}_0`;
     }
 
     return {
