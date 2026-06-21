@@ -15,7 +15,7 @@ import {
   calcEloChange, closeDatabase, createReport, resetPlayerElo, setPlayerElo,
   requestCancel, cancelMatch, updateMatchToken, getConfig, setConfig, Match, Result, PlayerInfo
 } from './database';
-import { createSandbox } from './sandbox';
+import { createSandbox, type SandboxBrowserResult } from './sandbox';
 
 dotenv.config();
 
@@ -166,6 +166,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
+const activeBrowsers = new Map<number, () => Promise<void>>();
+
+async function closeBrowserForMatch(matchId: number) {
+  const close = activeBrowsers.get(matchId);
+  if (close) {
+    await close();
+    activeBrowsers.delete(matchId);
+  }
+}
+
+async function closeAllBrowsers() {
+  const closers = [...activeBrowsers.values()];
+  activeBrowsers.clear();
+  await Promise.allSettled(closers.map(c => c()));
+}
+
 function isAdmin(interaction: ChatInputCommandInteraction): boolean {
   return interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
 }
@@ -190,58 +206,69 @@ async function sendDmWithButton(userId: string, embed: EmbedBuilder, matchId: nu
 }
 
 async function handle1v1(interaction: ChatInputCommandInteraction) {
-  const player1 = interaction.options.getUser('jugador1', true);
-  const player2 = interaction.options.getUser('jugador2', true);
+  try {
+    const player1 = interaction.options.getUser('jugador1', true);
+    const player2 = interaction.options.getUser('jugador2', true);
 
-  if (player1.bot || player2.bot) {
-    return interaction.reply({ content: 'No puedes mencionar bots.', flags: MessageFlags.Ephemeral });
-  }
-  if (player1.id === player2.id) {
-    return interaction.reply({ content: 'Deben ser dos jugadores diferentes.', flags: MessageFlags.Ephemeral });
-  }
+    if (player1.bot || player2.bot) {
+      return interaction.reply({ content: 'No puedes mencionar bots.', flags: MessageFlags.Ephemeral });
+    }
+    if (player1.id === player2.id) {
+      return interaction.reply({ content: 'Deben ser dos jugadores diferentes.', flags: MessageFlags.Ephemeral });
+    }
 
-  const region = interaction.options.getString('region') || 'auto';
+    const region = interaction.options.getString('region') || 'auto';
 
-  await interaction.deferReply();
+    await interaction.deferReply();
 
-  const result = await createSandbox(region === 'auto' ? undefined : region);
-  if (!result.success) {
-    return interaction.editReply(`No se pudo crear sandbox: ${result.error}\nUsa \`/party\` con un link manual.`);
-  }
+    const result = await createSandbox(region === 'auto' ? undefined : region);
+    if (!result.success) {
+      return interaction.editReply(`No se pudo crear sandbox: ${result.error}\nUsa \`/party\` con un link manual.`);
+    }
 
-  const uniqueId = result.region || 'sandbox';
-  const match = createMatch(interaction.channelId, player1.id, player2.id, uniqueId);
+    const uniqueId = result.region || 'sandbox';
+    const match = createMatch(interaction.channelId, player1.id, player2.id, uniqueId);
 
-  const embed = new EmbedBuilder()
-    .setTitle('Partida creada')
-    .setDescription(`${player1} vs ${player2}`)
-    .addFields(
-      { name: 'ID', value: `\`${match.id}\``, inline: true },
-      { name: 'Región', value: result.region || 'Auto', inline: true },
-      { name: 'ELO', value: `**${getPlayer(player1.id).elo}** vs **${getPlayer(player2.id).elo}**`, inline: true },
-      { name: 'Link', value: 'Enviado por mensaje directo', inline: false },
-    )
-    .setColor(0x00ff00);
+    activeBrowsers.set(match.id, result.close);
 
-  for (const u of [player1, player2]) {
-    const opponent = u.id === player1.id ? player2 : player1;
-    let oppName = opponent.displayName;
-    try { oppName = (await client.users.fetch(opponent.id)).displayName; } catch {}
-
-    const dmEmbed = new EmbedBuilder()
-      .setTitle('Partida de diep.io')
-      .setDescription(`Oponente: **${oppName}**`)
+    const embed = new EmbedBuilder()
+      .setTitle('Partida creada')
+      .setDescription(`${player1} vs ${player2}`)
       .addFields(
-        { name: 'Enlace', value: result.link },
-        { name: 'ID', value: `\`${match.id}\`` },
+        { name: 'ID', value: `\`${match.id}\``, inline: true },
+        { name: 'Región', value: result.region || 'Auto', inline: true },
+        { name: 'ELO', value: `**${getPlayer(player1.id).elo}** vs **${getPlayer(player2.id).elo}**`, inline: true },
+        { name: 'Link', value: 'Enviado por mensaje directo', inline: false },
       )
-      .setColor(0x0099ff);
+      .setColor(0x00ff00);
 
-    await sendDmWithButton(u.id, dmEmbed, match.id);
+    for (const u of [player1, player2]) {
+      const opponent = u.id === player1.id ? player2 : player1;
+      let oppName = opponent.displayName;
+      try { oppName = (await client.users.fetch(opponent.id)).displayName; } catch {}
+
+      const dmEmbed = new EmbedBuilder()
+        .setTitle('Partida de diep.io')
+        .setDescription(`Oponente: **${oppName}**`)
+        .addFields(
+          { name: 'Enlace', value: result.link },
+          { name: 'ID', value: `\`${match.id}\`` },
+        )
+        .setColor(0x0099ff);
+
+      await sendDmWithButton(u.id, dmEmbed, match.id);
+    }
+
+    try {
+      await interaction.editReply({ embeds: [embed] });
+      updateMatchToken(match.id, interaction.token);
+    } catch (err: any) {
+      console.error(`Error al editar reply de /1v1: ${err?.message || err}`);
+    }
+  } catch (err: any) {
+    console.error(`Error en handle1v1: ${err?.message || err}`);
+    try { await interaction.editReply('Ocurrió un error al crear la partida.'); } catch {}
   }
-
-  await interaction.editReply({ embeds: [embed] });
-  updateMatchToken(match.id, interaction.token);
 }
 
 async function handlePartySlash(interaction: ChatInputCommandInteraction) {
@@ -475,6 +502,7 @@ async function handleCancelButton(interaction: ButtonInteraction) {
 
   if (bothVoted) {
     cancelMatch(matchId);
+    await closeBrowserForMatch(match.id);
 
     const cancelEmbed = new EmbedBuilder()
       .setTitle('Partida cancelada ❌')
@@ -762,6 +790,7 @@ async function processMatchCompletion(match: Match, results: Result[]) {
 
   if (p1Score === p2Score) {
     completeMatch(match.id, null);
+    await closeBrowserForMatch(match.id);
 
     const drawEmbed = new EmbedBuilder()
       .setTitle('Partida finalizada — Empate')
@@ -795,6 +824,7 @@ async function processMatchCompletion(match: Match, results: Result[]) {
   const loserScore = Math.min(p1Score, p2Score);
 
   completeMatch(match.id, winnerId);
+  await closeBrowserForMatch(match.id);
 
   const eloChange = calcEloChange(winnerScore, loserScore);
   updatePlayerElo(winnerId, eloChange, true);
@@ -956,7 +986,7 @@ async function updateNickname(guild: Guild, userId: string, elo: number) {
   } catch {}
 }
 
-process.on('SIGINT', () => { closeDatabase(); client.destroy(); process.exit(0); });
-process.on('SIGTERM', () => { closeDatabase(); client.destroy(); process.exit(0); });
+process.on('SIGINT', async () => { await closeAllBrowsers(); closeDatabase(); client.destroy(); process.exit(0); });
+process.on('SIGTERM', async () => { await closeAllBrowsers(); closeDatabase(); client.destroy(); process.exit(0); });
 
 client.login(TOKEN);
