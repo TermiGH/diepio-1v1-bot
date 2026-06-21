@@ -165,10 +165,11 @@ export async function createSandbox(region?: string): Promise<SandboxBrowserResu
           console.log(`[sandbox] URL actualizada: ${current}`);
         }
         const count = await page.evaluate(() => {
-          const keys = Object.keys(window);
+          const g = globalThis as any;
+          const keys = Object.keys(g);
           for (const k of keys) {
             try {
-              const v = (window as any)[k];
+              const v = g[k];
               if (v && typeof v === 'object') {
                 if (v.entities && typeof v.entities === 'object') {
                   const n = Object.keys(v.entities).length;
