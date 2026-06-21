@@ -31,7 +31,7 @@ interface ServerListResponse {
 }
 
 const SANDBOX_GAMEMODES = ['sandbox'];
-const ROOM_ID_TIMEOUT_MS = 30000;
+const ROOM_ID_TIMEOUT_MS = 40000;
 
 let sharedBrowser: any = null;
 
@@ -119,64 +119,103 @@ export async function createSandbox(region?: string): Promise<SandboxBrowserResu
 
     const browser = await getBrowser();
     page = await browser.newPage();
+
     await page.setUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
     );
 
-    await page.evaluateOnNewDocument(`
-      (() => {
-        const origPush = history.pushState.bind(history);
-        history.pushState = function() { origPush(...arguments); window.__urlChanged = true; };
-        const origReplace = history.replaceState.bind(history);
-        history.replaceState = function() { origReplace(...arguments); window.__urlChanged = true; };
-      })();
-    `);
+    // Escuchar eventos de navegacion (para detectar cambios de URL)
+    let urlChanged = false;
+    page.on('framenavigated', (frame: any) => {
+      if (frame === page.mainFrame()) {
+        const u = frame.url();
+        if (u !== baseUrl) {
+          console.log(`[sandbox] framenavigated: ${u}`);
+          urlChanged = true;
+        }
+      }
+    });
 
-    await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await page.goto(baseUrl, { waitUntil: 'load', timeout: 20000 });
     console.log(`[sandbox] Cargada: ${page.url()}`);
 
+    // Esperar hasta 40s a que aparezca el room ID en la URL
     let finalUrl = page.url();
     const deadline = Date.now() + ROOM_ID_TIMEOUT_MS;
+
     while (Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 500));
-      finalUrl = page.url();
-      if (extractRoomId(finalUrl)) {
-        console.log(`[sandbox] Room ID: ${extractRoomId(finalUrl)}`);
+      const current = page.url();
+      const found = extractRoomId(current);
+      if (found) {
+        console.log(`[sandbox] Room ID detectado en URL: ${found}`);
+        finalUrl = current;
         break;
       }
+      // Tambien buscar via evaluate (por si la URL no cambia pero el juego tiene el dato)
+      try {
+        const jsRoomId = await page.evaluate(() => {
+          const g = globalThis as any;
+          const keys = Object.getOwnPropertyNames(g);
+          for (const key of keys) {
+            try {
+              const val = g[key];
+              if (val && typeof val === 'object') {
+                if (val.room && val.room.id && /^\d{6,}$/.test(String(val.room.id)))
+                  return String(val.room.id);
+                if (val.roomId && /^\d{6,}$/.test(String(val.roomId)))
+                  return String(val.roomId);
+                if (val.entities && typeof val.entities === 'object') {
+                  const entityCount = Object.keys(val.entities).length;
+                  if (entityCount > 0) {
+                    // Encontro game state con entidades - buscar room ID en otras props
+                    for (const prop of ['roomId', 'room', 'matchId', 'match']) {
+                      if (val[prop]) {
+                        const id = typeof val[prop] === 'object' ? val[prop].id : val[prop];
+                        if (id && /^\d{6,}$/.test(String(id)))
+                          return String(id);
+                      }
+                    }
+                  }
+                }
+              }
+            } catch {}
+          }
+          return null;
+        }).catch(() => null);
+        if (jsRoomId) {
+          console.log(`[sandbox] Room ID detectado via evaluate: ${jsRoomId}`);
+          finalUrl = `https://diep.io/?lobby=${target.regionCode}_${target.lobby.gamemode}_${target.lobby.ip}_${jsRoomId}_0`;
+          break;
+        }
+      } catch {}
+
+      await new Promise(r => setTimeout(r, 500));
     }
 
-    // Eliminar #r del hash (no deja entrar a los jugadores)
+    // Eliminar #r del hash
     finalUrl = finalUrl.split('#')[0];
-
     console.log(`[sandbox] URL final: ${finalUrl}`);
 
-    // Monitor en segundo plano: cuando entre alguien, cerrar la página
+    // Monitor en segundo plano: cuando entre alguien, cerrar pagina
     monitorInterval = setInterval(async () => {
       if (closed || !page || page.isClosed()) {
         if (monitorInterval) clearInterval(monitorInterval);
         return;
       }
       try {
-        const current = page.url();
-        const roomId = extractRoomId(current);
-        if (roomId && !finalUrl.includes(roomId)) {
-          finalUrl = current;
-          console.log(`[sandbox] URL actualizada: ${current}`);
-        }
         const count = await page.evaluate(() => {
           const g = globalThis as any;
-          const keys = Object.keys(g);
-          for (const k of keys) {
+          const keys = Object.getOwnPropertyNames(g);
+          for (const key of keys) {
             try {
-              const v = g[k];
-              if (v && typeof v === 'object') {
-                if (v.entities && typeof v.entities === 'object') {
-                  const n = Object.keys(v.entities).length;
+              const val = g[key];
+              if (val && typeof val === 'object') {
+                if (val.entities && typeof val.entities === 'object') {
+                  const n = Object.keys(val.entities).length;
                   if (n > 0) return n;
                 }
-                if (v.tanks && Array.isArray(v.tanks)) {
-                  return v.tanks.length;
+                if (val.tanks && Array.isArray(val.tanks)) {
+                  return val.tanks.length;
                 }
               }
             } catch {}
