@@ -190,13 +190,11 @@ export async function createSandbox(region?: string): Promise<SandboxBrowserResu
     let finalUrl: string;
     if (detected) {
       finalUrl = detected.url;
-      // Strip #r hash
-      finalUrl = finalUrl.replace(/#r\w+$/, '');
       console.log(`[sandbox] URL con room ID: ${finalUrl}`);
     } else {
       console.log(`[sandbox] Fallback: generando room ID aleatorio`);
       const roomId = Math.floor(100000000 + Math.random() * 900000000);
-      finalUrl = `https://diep.io/?lobby=${target.regionCode}_${target.lobby.gamemode}_${target.lobby.ip}_${roomId}_0`;
+      finalUrl = `https://diep.io/?lobby=${target.regionCode}_${target.lobby.gamemode}_${target.lobby.ip}_${roomId}_0#r${partyCode}`;
     }
 
     return {
