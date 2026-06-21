@@ -72,6 +72,18 @@ export function initDatabase(): void {
   } catch {
     /* columna ya existe */
   }
+
+  try {
+    db.exec(`ALTER TABLE players ADD COLUMN streak INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    /* columna ya existe */
+  }
+
+  try {
+    db.exec(`ALTER TABLE players ADD COLUMN best_streak INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    /* columna ya existe */
+  }
 }
 
 export interface Match {
@@ -101,6 +113,8 @@ export interface Player {
   elo: number;
   wins: number;
   losses: number;
+  streak: number;
+  best_streak: number;
   updated_at: string;
 }
 
@@ -252,17 +266,24 @@ export function getPlayerMatches(userId: string, tank?: string, limit: number = 
 export function updatePlayerElo(userId: string, eloChange: number, won: boolean): Player {
   const player = getPlayer(userId);
   const newElo = Math.max(0, player.elo + eloChange);
+  const newStreak = won ? player.streak + 1 : 0;
+  const newBest = Math.max(player.best_streak, newStreak);
   const stmt = db.prepare(`
-    UPDATE players SET elo = ?, wins = wins + ?, losses = losses + ?, updated_at = datetime('now')
+    UPDATE players SET elo = ?, wins = wins + ?, losses = losses + ?,
+      streak = ?, best_streak = ?, updated_at = datetime('now')
     WHERE user_id = ?
   `);
-  stmt.run(newElo, won ? 1 : 0, won ? 0 : 1, userId);
-  return { ...player, elo: newElo, wins: player.wins + (won ? 1 : 0), losses: player.losses + (won ? 0 : 1) };
+  stmt.run(newElo, won ? 1 : 0, won ? 0 : 1, newStreak, newBest, userId);
+  return {
+    ...player, elo: newElo,
+    wins: player.wins + (won ? 1 : 0), losses: player.losses + (won ? 0 : 1),
+    streak: newStreak, best_streak: newBest
+  };
 }
 
 export function resetPlayerElo(userId: string): void {
   getPlayer(userId);
-  const stmt = db.prepare(`UPDATE players SET elo = 500, wins = 0, losses = 0, updated_at = datetime('now') WHERE user_id = ?`);
+  const stmt = db.prepare(`UPDATE players SET elo = 500, wins = 0, losses = 0, streak = 0, updated_at = datetime('now') WHERE user_id = ?`);
   stmt.run(userId);
 }
 

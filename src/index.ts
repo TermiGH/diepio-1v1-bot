@@ -341,7 +341,8 @@ async function handleInfo(interaction: ChatInputCommandInteraction) {
       { name: 'ELO', value: `**${player.elo}**`, inline: true },
       { name: 'Victorias', value: `${player.wins}`, inline: true },
       { name: 'Derrotas', value: `${player.losses}`, inline: true },
-      { name: 'Total partidas', value: `${totalGames}`, inline: true },
+      { name: 'Racha', value: player.streak > 0 ? `🔥 **${player.streak}**` : `**${player.streak}**`, inline: true },
+      { name: 'Mejor racha', value: `**${player.best_streak}**`, inline: true },
       { name: 'Win rate', value: `${winRate}%`, inline: true },
     )
     .setColor(0x00ff00);
@@ -402,7 +403,8 @@ async function handleInfoTankSelect(interaction: StringSelectMenuInteraction) {
       { name: 'ELO', value: `**${player.elo}**`, inline: true },
       { name: 'Victorias', value: `${player.wins}`, inline: true },
       { name: 'Derrotas', value: `${player.losses}`, inline: true },
-      { name: 'Total partidas', value: `${totalGames}`, inline: true },
+      { name: 'Racha', value: player.streak > 0 ? `🔥 **${player.streak}**` : `**${player.streak}**`, inline: true },
+      { name: 'Mejor racha', value: `**${player.best_streak}**`, inline: true },
       { name: 'Win rate', value: `${winRate}%`, inline: true },
     );
     if (info.tankStats.length > 0) {
@@ -424,6 +426,8 @@ async function handleInfoTankSelect(interaction: StringSelectMenuInteraction) {
     embed.setTitle(`Información de ${target.displayName} — ${tName}`);
     embed.addFields(
       { name: 'ELO total', value: `**${player.elo}**`, inline: true },
+      { name: 'Racha', value: player.streak > 0 ? `🔥 **${player.streak}**` : `**${player.streak}**`, inline: true },
+      { name: 'Mejor racha', value: `**${player.best_streak}**`, inline: true },
       { name: `${tName} — Victorias`, value: `${tankWins}`, inline: true },
       { name: `${tName} — Derrotas`, value: `${tankLosses}`, inline: true },
       { name: `${tName} — Partidas`, value: `${tankTotal}`, inline: true },
@@ -747,7 +751,22 @@ async function handleResultModal(interaction: ModalSubmitInteraction) {
   await interaction.reply(`✅ Resultado registrado: **${myScore}** - **${opponentScore}** (${tank})`);
 
   const updated = getResults(matchId);
-  if (updated.length < 2) return;
+  if (updated.length < 2) {
+    const opponentId = match.player1_id === interaction.user.id ? match.player2_id : match.player1_id;
+    try {
+      const oppUser = await client.users.fetch(opponentId);
+      const remindedEmbed = new EmbedBuilder()
+        .setTitle('⏳ Esperando tu resultado')
+        .setDescription(`<@${interaction.user.id}> ya reportó su resultado para la partida **#${matchId}**.`)
+        .addFields(
+          { name: 'ID', value: `\`${matchId}\`` },
+          { name: 'Acción', value: 'Usá el botón **📝 Reportar resultado** en el mensaje de la partida para reportar el tuyo.' }
+        )
+        .setColor(0xffa500);
+      await oppUser.send({ embeds: [remindedEmbed] });
+    } catch {}
+    return;
+  }
 
   await processMatchCompletion(match, updated);
 }
@@ -947,7 +966,22 @@ client.on(Events.MessageCreate, async (message) => {
   await message.reply(`✅ Resultado registrado: **${myScore}-${opponentScore}**`);
 
   const updated = getResults(matchId);
-  if (updated.length < 2) return;
+  if (updated.length < 2) {
+    const opponentId = match.player1_id === message.author.id ? match.player2_id : match.player1_id;
+    try {
+      const oppUser = await client.users.fetch(opponentId);
+      const remindedEmbed = new EmbedBuilder()
+        .setTitle('⏳ Esperando tu resultado')
+        .setDescription(`<@${message.author.id}> ya reportó su resultado para la partida **#${matchId}**.`)
+        .addFields(
+          { name: 'ID', value: `\`${matchId}\`` },
+          { name: 'Acción', value: 'Usá `result ID TU_PUNTOS-PUNTOS_RIVAL` para reportar el tuyo.' }
+        )
+        .setColor(0xffa500);
+      await oppUser.send({ embeds: [remindedEmbed] });
+    } catch {}
+    return;
+  }
 
   await processMatchCompletion(match, updated);
 });
