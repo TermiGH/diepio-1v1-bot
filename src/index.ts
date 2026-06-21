@@ -167,6 +167,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 const activeBrowsers = new Map<number, () => Promise<void>>();
+const matchTimeouts = new Map<number, NodeJS.Timeout>();
 
 async function closeBrowserForMatch(matchId: number) {
   const close = activeBrowsers.get(matchId);
@@ -174,12 +175,19 @@ async function closeBrowserForMatch(matchId: number) {
     await close();
     activeBrowsers.delete(matchId);
   }
+  const timeout = matchTimeouts.get(matchId);
+  if (timeout) {
+    clearTimeout(timeout);
+    matchTimeouts.delete(matchId);
+  }
 }
 
 async function closeAllBrowsers() {
   const closers = [...activeBrowsers.values()];
   activeBrowsers.clear();
   await Promise.allSettled(closers.map(c => c()));
+  for (const t of matchTimeouts.values()) clearTimeout(t);
+  matchTimeouts.clear();
 }
 
 function isAdmin(interaction: ChatInputCommandInteraction): boolean {
@@ -230,6 +238,34 @@ async function handle1v1(interaction: ChatInputCommandInteraction) {
     const match = createMatch(interaction.channelId, player1.id, player2.id, uniqueId);
 
     activeBrowsers.set(match.id, result.close);
+
+    const timeout = setTimeout(async () => {
+      const m = getMatch(match.id);
+      if (m && m.status === 'pending') {
+        cancelMatch(match.id);
+        await closeBrowserForMatch(match.id);
+
+        const cancelEmbed = new EmbedBuilder()
+          .setTitle('Partida cancelada ⏰')
+          .setDescription(`<@${m.player1_id}> vs <@${m.player2_id}>`)
+          .addFields(
+            { name: 'ID', value: `\`${m.id}\``, inline: true },
+            { name: 'Motivo', value: 'Pasaron 30 minutos sin reportar resultado', inline: false },
+          )
+          .setColor(0x888888);
+
+        await updateMatchEmbed(m, cancelEmbed);
+
+        for (const id of [m.player1_id, m.player2_id]) {
+          try {
+            const u = await client.users.fetch(id);
+            await u.send({ embeds: [cancelEmbed] });
+          } catch {}
+        }
+      }
+      matchTimeouts.delete(match.id);
+    }, 30 * 60 * 1000);
+    matchTimeouts.set(match.id, timeout);
 
     const embed = new EmbedBuilder()
       .setTitle('Partida creada')
@@ -285,6 +321,27 @@ async function handlePartySlash(interaction: ChatInputCommandInteraction) {
   const matchLink = link.startsWith('http') ? link : `https://${link}`;
   const uniqueId = matchLink.split('#')[1]?.slice(0, 8) || 'LINK';
   const match = createMatch(interaction.channelId, player1.id, player2.id, uniqueId);
+
+  const pTimeout = setTimeout(async () => {
+    const m = getMatch(match.id);
+    if (m && m.status === 'pending') {
+      cancelMatch(match.id);
+      const cancelEmbed = new EmbedBuilder()
+        .setTitle('Partida cancelada ⏰')
+        .setDescription(`<@${m.player1_id}> vs <@${m.player2_id}>`)
+        .addFields(
+          { name: 'ID', value: `\`${m.id}\``, inline: true },
+          { name: 'Motivo', value: 'Pasaron 30 minutos sin reportar resultado', inline: false },
+        )
+        .setColor(0x888888);
+      await updateMatchEmbed(m, cancelEmbed);
+      for (const id of [m.player1_id, m.player2_id]) {
+        try { const u = await client.users.fetch(id); await u.send({ embeds: [cancelEmbed] }); } catch {}
+      }
+    }
+    matchTimeouts.delete(match.id);
+  }, 30 * 60 * 1000);
+  matchTimeouts.set(match.id, pTimeout);
 
   const embed = new EmbedBuilder()
     .setTitle('Partida creada (Manual)')
