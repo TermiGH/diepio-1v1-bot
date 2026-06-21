@@ -972,14 +972,19 @@ async function trySendToChannel(channelId: string, embed: EmbedBuilder) {
 
 async function trySendToResultChannel(embed: EmbedBuilder) {
   const resultChannelId = getConfig('result_channel_id');
-  if (!resultChannelId) return;
+  if (!resultChannelId) {
+    console.log('[result] No hay canal configurado. Usa /setchannel para configurar.');
+    return;
+  }
   try {
     const channel = await client.channels.fetch(resultChannelId);
     if (channel && 'send' in channel) {
       await (channel as any).send({ embeds: [embed] });
+    } else {
+      console.error(`[result] Canal ${resultChannelId} no es un canal de texto válido`);
     }
   } catch (err: any) {
-    console.error(`No se pudo enviar al canal de resultados ${resultChannelId}: ${err?.message || err}`);
+    console.error(`[result] Error enviando al canal ${resultChannelId}: ${err?.message || err}`);
   }
 }
 
