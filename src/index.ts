@@ -54,7 +54,7 @@ const commands = [
       )),
 
   new SlashCommandBuilder()
-    .setName('party')
+    .setName('duel')
     .setDescription('Crea partida con link manual')
     .addUserOption(o => o.setName('jugador1').setDescription('Primer jugador').setRequired(true))
     .addUserOption(o => o.setName('jugador2').setDescription('Segundo jugador').setRequired(true))
@@ -127,7 +127,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (!interaction.guild) return;
     const cmd = interaction as ChatInputCommandInteraction;
     if (cmd.commandName === '1v1') await handle1v1(cmd);
-    else if (cmd.commandName === 'party') await handlePartySlash(cmd);
+    else if (cmd.commandName === 'duel') await handlePartySlash(cmd);
     else if (cmd.commandName === 'leaderboard') await handleLeaderboard(cmd);
     else if (cmd.commandName === 'info') await handleInfo(cmd);
     else if (cmd.commandName === 'report') await handleReport(cmd);
@@ -214,97 +214,10 @@ async function sendDmWithButton(userId: string, embed: EmbedBuilder, matchId: nu
 }
 
 async function handle1v1(interaction: ChatInputCommandInteraction) {
-  try {
-    const player1 = interaction.options.getUser('jugador1', true);
-    const player2 = interaction.options.getUser('jugador2', true);
-
-    if (player1.bot || player2.bot) {
-      return interaction.reply({ content: 'No puedes mencionar bots.', flags: MessageFlags.Ephemeral });
-    }
-    if (player1.id === player2.id) {
-      return interaction.reply({ content: 'Deben ser dos jugadores diferentes.', flags: MessageFlags.Ephemeral });
-    }
-
-    const region = interaction.options.getString('region') || 'auto';
-
-    await interaction.deferReply();
-
-    const result = await createSandbox(region === 'auto' ? undefined : region);
-    if (!result.success) {
-      return interaction.editReply(`No se pudo crear sandbox: ${result.error}\nUsa \`/party\` con un link manual.`);
-    }
-
-    const uniqueId = result.region || 'sandbox';
-    const match = createMatch(interaction.channelId, player1.id, player2.id, uniqueId);
-
-    activeBrowsers.set(match.id, result.close);
-
-    const timeout = setTimeout(async () => {
-      const m = getMatch(match.id);
-      if (m && m.status === 'pending') {
-        cancelMatch(match.id);
-        await closeBrowserForMatch(match.id);
-
-        const cancelEmbed = new EmbedBuilder()
-          .setTitle('Partida cancelada ⏰')
-          .setDescription(`<@${m.player1_id}> vs <@${m.player2_id}>`)
-          .addFields(
-            { name: 'ID', value: `\`${m.id}\``, inline: true },
-            { name: 'Motivo', value: 'Pasaron 30 minutos sin reportar resultado', inline: false },
-          )
-          .setColor(0x888888);
-
-        await updateMatchEmbed(m, cancelEmbed);
-
-        for (const id of [m.player1_id, m.player2_id]) {
-          try {
-            const u = await client.users.fetch(id);
-            await u.send({ embeds: [cancelEmbed] });
-          } catch {}
-        }
-      }
-      matchTimeouts.delete(match.id);
-    }, 30 * 60 * 1000);
-    matchTimeouts.set(match.id, timeout);
-
-    const embed = new EmbedBuilder()
-      .setTitle('Partida creada')
-      .setDescription(`${player1} vs ${player2}`)
-      .addFields(
-        { name: 'ID', value: `\`${match.id}\``, inline: true },
-        { name: 'Región', value: result.region || 'Auto', inline: true },
-        { name: 'ELO', value: `**${getPlayer(player1.id).elo}** vs **${getPlayer(player2.id).elo}**`, inline: true },
-        { name: 'Link', value: 'Enviado por mensaje directo', inline: false },
-      )
-      .setColor(0x00ff00);
-
-    for (const u of [player1, player2]) {
-      const opponent = u.id === player1.id ? player2 : player1;
-      let oppName = opponent.displayName;
-      try { oppName = (await client.users.fetch(opponent.id)).displayName; } catch {}
-
-      const dmEmbed = new EmbedBuilder()
-        .setTitle('Partida de diep.io')
-        .setDescription(`Oponente: **${oppName}**`)
-        .addFields(
-          { name: 'Enlace', value: result.link },
-          { name: 'ID', value: `\`${match.id}\`` },
-        )
-        .setColor(0x0099ff);
-
-      await sendDmWithButton(u.id, dmEmbed, match.id);
-    }
-
-    try {
-      await interaction.editReply({ embeds: [embed] });
-      updateMatchToken(match.id, interaction.token);
-    } catch (err: any) {
-      console.error(`Error al editar reply de /1v1: ${err?.message || err}`);
-    }
-  } catch (err: any) {
-    console.error(`Error en handle1v1: ${err?.message || err}`);
-    try { await interaction.editReply('Ocurrió un error al crear la partida.'); } catch {}
-  }
+  await interaction.reply({
+    content: 'El comando `/1v1` está en mantenimiento. Usa `/duel` para crear partidas con link manual.',
+    flags: MessageFlags.Ephemeral
+  });
 }
 
 async function handlePartySlash(interaction: ChatInputCommandInteraction) {
