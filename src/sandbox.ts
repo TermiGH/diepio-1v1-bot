@@ -31,12 +31,13 @@ interface ServerListResponse {
 }
 
 const SANDBOX_GAMEMODES = ['sandbox'];
-const ROOM_ID_TIMEOUT_MS = 25000;
+const ROOM_ID_TIMEOUT_MS = 30000;
 
 let sharedBrowser: any = null;
 
 async function getBrowser() {
   if (!sharedBrowser || !sharedBrowser.isConnected()) {
+    console.log('[sandbox] Lanzando Chromium...');
     sharedBrowser = await puppeteer.launch({
       headless: process.env.BROWSER_VISIBLE === 'true' ? false : true,
       args: [
@@ -74,9 +75,61 @@ function fetchJson(url: string): Promise<any> {
   });
 }
 
+function extractRoomIdFromUrl(url: string): string | null {
+  try {
+    const u = new URL(url);
+    const lobby = u.searchParams.get('lobby');
+    if (!lobby) return null;
+    const parts = lobby.split('_');
+    // Format: region_gamemode_hostname:port_roomID_0 (5+ parts)
+    if (parts.length >= 5) {
+      const roomId = parts[parts.length - 2]; // second to last
+      if (roomId && /^\d{6,}$/.test(roomId)) return roomId;
+    }
+  } catch {}
+  return null;
+}
+
+async function tryDetectRoomId(page: any, baseUrl: string): Promise<{ url: string } | null> {
+  const startedAt = Date.now();
+  const deadline = startedAt + ROOM_ID_TIMEOUT_MS;
+  let lastUrl = page.url();
+
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 500));
+    const currentUrl = page.url();
+
+    if (currentUrl !== lastUrl) {
+      console.log(`[sandbox] URL cambió: ${currentUrl}`);
+      lastUrl = currentUrl;
+    }
+
+    const roomId = extractRoomIdFromUrl(currentUrl);
+    if (roomId) {
+      console.log(`[sandbox] Room ID detectado en URL: ${roomId}`);
+      return { url: currentUrl };
+    }
+
+    const stateChanged = await page.evaluate(`window.__urlChanged === true`).catch(() => false);
+    if (stateChanged) {
+      console.log(`[sandbox] pushState/replaceState detectado`);
+      // Volver a chequear URL en el próximo ciclo
+    }
+  }
+
+  const finalCheck = extractRoomIdFromUrl(page.url());
+  if (finalCheck) {
+    console.log(`[sandbox] Room ID detectado al final: ${finalCheck}`);
+    return { url: page.url() };
+  }
+
+  return null;
+}
+
 export async function createSandbox(region?: string): Promise<SandboxBrowserResult> {
   let page: any = null;
   try {
+    console.log('[sandbox] Obteniendo servidores...');
     const response: ServerListResponse = await fetchJson('https://lb.diep.io/api/lb/pc');
 
     const sandboxLobbies: { lobby: Lobby; regionCode: string }[] = [];
@@ -105,6 +158,7 @@ export async function createSandbox(region?: string): Promise<SandboxBrowserResu
 
     const partyCode = Math.random().toString(36).substring(2, 10);
     const baseUrl = `https://diep.io/?lobby=${target.regionCode}_${target.lobby.gamemode}_${target.lobby.ip}#r${partyCode}`;
+    console.log(`[sandbox] URL base: ${baseUrl}`);
 
     const browser = await getBrowser();
     page = await browser.newPage();
@@ -128,27 +182,19 @@ export async function createSandbox(region?: string): Promise<SandboxBrowserResu
       })();
     `);
 
-    await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    console.log(`[sandbox] Página cargada. URL inicial: ${page.url()}`);
 
-    const deadline = Date.now() + ROOM_ID_TIMEOUT_MS;
-    let finalUrl = page.url();
+    const detected = await tryDetectRoomId(page, baseUrl);
 
-    while (Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 500));
-      finalUrl = page.url();
-      if (finalUrl !== baseUrl) break;
-    }
-
-    await new Promise(r => setTimeout(r, 1500));
-    finalUrl = page.url();
-
-    // Strip #r hash — solo necesario para crear sala, no para los jugadores
-    finalUrl = finalUrl.replace(/#r\w+$/, '');
-
-    const lobbyParam = new URL(finalUrl).searchParams.get('lobby') || '';
-    const parts = lobbyParam.split('_');
-
-    if (parts.length < 5 && parts.length >= 3) {
+    let finalUrl: string;
+    if (detected) {
+      finalUrl = detected.url;
+      // Strip #r hash
+      finalUrl = finalUrl.replace(/#r\w+$/, '');
+      console.log(`[sandbox] URL con room ID: ${finalUrl}`);
+    } else {
+      console.log(`[sandbox] Fallback: generando room ID aleatorio`);
       const roomId = Math.floor(100000000 + Math.random() * 900000000);
       finalUrl = `https://diep.io/?lobby=${target.regionCode}_${target.lobby.gamemode}_${target.lobby.ip}_${roomId}_0`;
     }
@@ -162,6 +208,7 @@ export async function createSandbox(region?: string): Promise<SandboxBrowserResu
       },
     };
   } catch (err: any) {
+    console.error(`[sandbox] Error: ${err?.message || err}`);
     if (page) {
       try { await page.close(); } catch {}
     }
