@@ -15,7 +15,7 @@ import {
   calcEloChange, closeDatabase, createReport, resetPlayerElo, setPlayerElo,
   requestCancel, cancelMatch, updateMatchToken, getConfig, setConfig, Match, Result, PlayerInfo
 } from './database';
-import { createSandbox, type SandboxBrowserResult } from './sandbox';
+import { createSandbox, type SandboxBrowserResult, closeSharedBrowser } from './sandbox';
 
 dotenv.config();
 
@@ -1043,7 +1043,7 @@ async function updateNickname(guild: Guild, userId: string, elo: number) {
   } catch {}
 }
 
-process.on('SIGINT', async () => { await closeAllBrowsers(); closeDatabase(); client.destroy(); process.exit(0); });
-process.on('SIGTERM', async () => { await closeAllBrowsers(); closeDatabase(); client.destroy(); process.exit(0); });
+process.on('SIGINT', async () => { await closeAllBrowsers(); await closeSharedBrowser(); closeDatabase(); client.destroy(); process.exit(0); });
+process.on('SIGTERM', async () => { await closeAllBrowsers(); await closeSharedBrowser(); closeDatabase(); client.destroy(); process.exit(0); });
 
 client.login(TOKEN);
