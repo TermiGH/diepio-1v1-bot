@@ -90,7 +90,9 @@ export async function createSandbox(region?: string): Promise<SandboxBrowserResu
 
     filtered.sort((a, b) => a.lobby.numPlayers - b.lobby.numPlayers);
     const target = filtered[0];
-    const baseUrl = `https://diep.io/?lobby=${target.regionCode}_${target.lobby.gamemode}_${target.lobby.ip}`;
+
+    const partyCode = Math.random().toString(36).substring(2, 10);
+    const baseUrl = `https://diep.io/?lobby=${target.regionCode}_${target.lobby.gamemode}_${target.lobby.ip}#r${partyCode}`;
 
     browser = await launchBrowser();
     const page = await browser.newPage();
@@ -159,7 +161,7 @@ export async function createSandbox(region?: string): Promise<SandboxBrowserResu
       // URL didn't get room ID — try fallback: add random room ID ourselves
       console.log(`[sandbox] No se detectó room ID. Usando fallback con ID generado.`);
       const roomId = Math.floor(100000000 + Math.random() * 900000000);
-      const fallbackUrl = `https://diep.io/?lobby=${target.regionCode}_${target.lobby.gamemode}_${target.lobby.ip}_${roomId}_0`;
+      const fallbackUrl = `https://diep.io/?lobby=${target.regionCode}_${target.lobby.gamemode}_${target.lobby.ip}_${roomId}_0#r${partyCode}`;
       finalUrl = fallbackUrl;
     }
 
