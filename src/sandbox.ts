@@ -192,7 +192,7 @@ export async function createSandbox(region?: string): Promise<SandboxBrowserResu
 
       // 2. Revisar location.hash via evaluate
       try {
-        const hash = await page.evaluate(() => location.hash).catch(() => '');
+        const hash = await page.evaluate('location.hash').catch(() => '');
         if (hash && hash.startsWith('#r') && hash.length > 3) {
           console.log(`[sandbox] Hash detectado: ${hash}`);
           finalUrl = finalUrl.split('#')[0]; // mantener solo lo anterior al hash
@@ -209,7 +209,7 @@ export async function createSandbox(region?: string): Promise<SandboxBrowserResu
 
       // 3. Revisar party code interceptado
       try {
-        const partyCode = await page.evaluate(() => (window as any).__partyCode || null).catch(() => null);
+        const partyCode = await page.evaluate('window.__partyCode || null').catch(() => null);
         if (partyCode) {
           console.log(`[sandbox] Party code capturado: ${partyCode}`);
           interceptedLink = `${baseUrl}#r${partyCode}`;
